@@ -1,4 +1,4 @@
 scrypts
 =======
 
-python scripts
+miscellaneous scripts
