@@ -45,7 +45,7 @@ if __name__ == "__main__":
         for lyne_length in sorted(by_length.keys()):
             for lyne in by_length.get(lyne_length):
                 i += 1
-                print("(%d) %s%s" % (lyne_length, lyne[:80], "..." and (len(lyne) > 80) or ""))
+                print("(%d) %s%s" % (lyne_length, lyne[:80], (len(lyne) > 80) and "..." or ""))
                 
     if not op.sortbylength:
         print
