@@ -23,23 +23,22 @@ if __name__ == "__main__":
     by_length = {}
     
     i = 0
-    longlen = 0
-    longline = 0
-    longdet = None
+    longest_len = 0
+    longest_line = 0
+    longest_content = None
     for lyne in data:
         i += 1
-        curlen = len(lyne)
-        lynes = by_length.get(curlen,[])
+        current_len = len(lyne)
+        lynes = by_length.get(current_len, [])
         lynes.append(lyne)
-        by_length[curlen] = lynes
+        by_length[current_len] = lynes
         
-        if (curlen > longlen):
-            longlen = curlen
-            longline = i
-            longdet = lyne
+        if (current_len > longest_len):
+            longest_len = current_len
+            longest_line = i
+            longest_content = lyne
         if not op.sortbylength:
-            print("%s. len=%s" % (i, curlen))
-            
+            print("#%s (%s)" % (i, current_len))
             
     if op.sortbylength:
         i = 0
@@ -50,6 +49,6 @@ if __name__ == "__main__":
                 
     if not op.sortbylength:
         print
-        print("Longest line: %s. (%s): %s" % (longline,longlen,longdet))
+        print("Longest line: #%s (%s):\n %s" % (longest_line, longest_len, longest_content))
     f.close()
     
