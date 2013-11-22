@@ -18,7 +18,7 @@ Examples:
 
     zipinstall                  ==> look for install-*.sql and generate install.zip containing install/install-*sql and any files needed
                                     (simple case -- files must exist from CWD down; does not look in parent directories; first script found wins)
-    zipinstall 1.0.11.3         ==> run this at the install or pending-install level or above; it will look for an install script in 
+    zipinstall 1.0.11.3         ==> run this above the install or pending-install directories; it will look for an install script in 
                                     a directory starting with REL-1.0.11.3, and generate REL-1.0.11.3.zip
 
 Synopsis:
