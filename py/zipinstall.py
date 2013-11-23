@@ -16,10 +16,12 @@ Summary:
 
 Examples:
 
-    zipinstall                  ==> look for install-*.sql and generate install.zip containing install/install-*sql and any files needed
-                                    (simple case -- files must exist from CWD down; does not look in parent directories; first script found wins)
-    zipinstall 1.0.11.3         ==> run this above the install or pending-install directories; it will look for an install script in 
-                                    a directory starting with REL-1.0.11.3, and generate REL-1.0.11.3.zip
+    zipinstall              ==> will look for install script (of the pattern install-*.sql) from the CWD down
+                                (first one found wins), and generate install.zip containing install/install-*sql 
+                                and any files needed.
+
+    zipinstall 1.0.11.3     ==> run this at the root of a project; it will look for an install script in 
+                                a directory matching REL-1.0.11.3, and generate REL-1.0.11.3.zip
 
 Synopsis:
 
@@ -36,11 +38,16 @@ Synopsis:
 
 def read_options():
     parser = argparse.ArgumentParser(description='Generates an install zip file for a DBA')
-    parser.add_argument('-f', '--file_template', metavar='FILE_TEMPLATE', default='install-*.sql', help='describes the install file name pattern to look for (default: install-*.sql)')
-    parser.add_argument('--dry_run', default=False, action='store_true', help='disables writing the zip file, just displays what it would contain')
-    parser.add_argument('-d', '--debug_enabled', default=False, action='store_true', help='enable debug output')   
-    parser.add_argument('-v', '--verbose', default=False, action='store_true', help='enable verbose mode')
-    parser.add_argument('path_template', default=None, nargs='?', help='[optional] the path segment install file should be in (note: A.B => REL-A.B)')
+    parser.add_argument('-f', '--file_template', metavar='FILE_TEMPLATE', default='install-*.sql', 
+                        help='describes the install file name pattern to look for (default: install-*.sql)')
+    parser.add_argument('--dry_run', default=False, action='store_true', 
+                        help='disables writing the zip file, just displays what it would contain')
+    parser.add_argument('-d', '--debug_enabled', default=False, action='store_true', 
+                        help='enable debug output')   
+    parser.add_argument('-v', '--verbose', default=False, action='store_true', 
+                        help='enable verbose mode')
+    parser.add_argument('path_template', default=None, nargs='?', 
+                        help='[optional] the path segment install file should be in (note: A.B => REL-A.B)')
     return parser.parse_args(sys.argv[1:])
 
 def debug(text):
@@ -50,9 +57,12 @@ def debug(text):
 def is_verbose():
     return opts.verbose        
 
-def show(str, always=False):
+def maybe_show(str, always=False):
     if is_verbose() or always:
         print(str)
+
+def show(str):
+    print(str)
 
 def has_ext(filespec):
     return os.path.splitext(filespec)[1]
@@ -75,13 +85,7 @@ def expected_path():
     """
     return is_dotted_number(opts.path_template) and ("REL-%s" % opts.path_template) or opts.path_template 
 
-def zip_filename():
-    """
-    the file name of the to-be-output zip file
-    """
-    return "%s.zip" % (expected_path() or "install")
-
-def scan_install_path(current_path, expected_path, expected_file_pattern):
+def scan_install_path(current_path, expected_path_pattern, expected_file_pattern):
     """
     starting at current_path, 
     look for an install script file matching the expected file pattern (e.g. install-*.sql)
@@ -92,38 +96,55 @@ def scan_install_path(current_path, expected_path, expected_file_pattern):
     """
 
     script_file = None
+    script_subdir = None
     file_tree = []
     debug("install script file pattern: %s" % expected_file_pattern)
     for path,dirs,files in os.walk(current_path):
         for f in files:
             filespec = os.path.join(path, f)
-            file_tree.append(filespec)
-            if fnmatch(f, expected_file_pattern):
-                debug("potential script is %s" % filespec)
-                debug("expected dir pattern is %s" % expected_path)
-                if path_matches_dir(filespec, expected_path) and not script_file:
-                    script_file = filespec
-    return (script_file, file_tree)
+            if not filespec.startswith("./.git/"):
+                file_tree.append(filespec)
+                if fnmatch(f, expected_file_pattern):
+                    debug("potential script is %s" % filespec)
+                    debug("expected dir pattern is %s" % expected_path_pattern)
+                    matching_subdir = find_matching_subdir(filespec, expected_path_pattern)
+                    if matching_subdir:
+                        script_file = filespec
+                        script_subdir = matching_subdir
+                        debug("matching subdir = %s" % matching_subdir)
+    return (script_file, script_subdir, file_tree)
 
-def path_matches_dir(filespec, dir_snippet):
+def find_matching_subdir(filespec, dir_snippet):
     """
-    True if the given filespec contains the given dir_snippet either at the start or end of a directory name
-    
-    examples: path_contains_dir("pending-install/REL-1.0-my-install/mytable.tab", "REL-1.0")    ==> True
-              path_contains_dir("pending-install/REL-1.0-my-install/mytable.tab", "my-install") ==> True
-              path_contains_dir("pending-install/REL-1.0-my-install/mytable.tab", "my")         ==> False
-              path_contains_dir("pending-install/REL-1.0-my-install/mytable.tab", None)         ==> True
+    given a full filespec and a directory snippet (e.g. 1.0.1), returns the actual subdirectory matching the
+    snippet if the filespec is found underneath that subdirectory.
+    (to match, a subdir has to match the snippet or match snippet followed by a dash)
+
+    if no dir_snippet given, return the parent directory of the filespec
+
+    examples: find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "REL-1.0")    
+              ==> REL-1.0-my-install
+
+              find_matching_subdir("pending-install/REL-1.0.5-my-install/mytable.tab", "REL-1.0") 
+              ==> None
+
+              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "my")         
+              ==> None
+
+              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "asdf")         
+              ==> None
+
+              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", None)         
+              ==> REL-1.0-my-install
     """
 
-    if not dir_snippet:
-        return True
     while filespec:
         (filespec, part) = os.path.split(filespec)
-        debug("expecting %s to start or end with %s" % (part, dir_snippet))
-        if part.startswith(dir_snippet) or part.endswith(dir_snippet):
+        debug("trying to find subdir matching %s from %s" % (dir_snippet, part))
+        if not dir_snippet or part == dir_snippet or part.startswith("%s-" % dir_snippet):
             debug("expected dir found: %s/%s" % (filespec, part))
-            return True
-    return False
+            return part
+    return None
 
 def find_file_in_tree(some_file, file_tree):
     if some_file.startswith(".") or some_file.startswith("/") or some_file.startswith("\\"):
@@ -145,15 +166,15 @@ def locate_referred_file(text):
         debug("looking for %s" % possible_file)
         filespec = find_file_in_tree(possible_file, file_tree)
         if not filespec:
-            raise Exception("Could not find file metioned in line: %s" % text)
+            raise Exception("Could not find file mentioned in the line: %s" % text)
     return filespec
 
 def generate_zip_file(zip_name, install_file, file_tree):
     files_to_include = [install_file]
     if not install_file:
-        print("Nothing to do")
+        return None
     else:
-        print("%s %s ..." % (not opts.dry_run and "Creating" or "Would be", zip_name))
+        maybe_show("%s %s ..." % (not opts.dry_run and "Creating" or "Would be", zip_name), always=opts.dry_run)
         try:
             f = file(install_file, "r")
             contents = [row.strip() for row in f.readlines()]
@@ -171,12 +192,14 @@ def generate_zip_file(zip_name, install_file, file_tree):
                 install_zip = ZipFile(zip_name, "w")
             for filename in files_to_include:
                 filespec_in_archive = "%s/%s" % (strip_ext(zip_name), os.path.basename(filename))
-                show("... ENTRY: %s" % filespec_in_archive, always=opts.dry_run)
+                maybe_show("... ENTRY: %s" % filespec_in_archive, always=opts.dry_run)
                 if not opts.dry_run:
                     install_zip.write(filename, filespec_in_archive)
         finally:
             if not opts.dry_run:
                 install_zip.close()
+        return zip_name
+
 
 # ________________________
 
@@ -185,9 +208,17 @@ if __name__ == "__main__":
 
     opts = read_options()
 
-    (script, file_tree) = scan_install_path(".", expected_path(), opts.file_template)
+    (script, actual_path, file_tree) = scan_install_path(".", expected_path(), opts.file_template)
 
     debug("all files encountered:\n   %s" % "\n  ".join(file_tree))
     debug("script=%s" % script)
 
-    generate_zip_file(zip_filename(), script, file_tree)
+    zip_file = generate_zip_file("%s.zip" % actual_path, script, file_tree)
+    show(zip_file or "Nothing to do!")
+
+"""
+TODO:
+
+-- allow to be run inside the install directory
+
+"""
