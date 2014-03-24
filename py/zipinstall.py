@@ -4,9 +4,12 @@ import os
 import re
 import sys
 from argparse import ArgumentParser
+from argparse import RawDescriptionHelpFormatter
 from glob import glob
 from fnmatch import fnmatch
 from zipfile import ZipFile
+
+VERSION = 1.1
 
 opts = {}
 
@@ -21,21 +24,49 @@ Examples:
 
     zipinstall 1.0.11.3     ==> run this at the root of a project; it will look for an install script in 
                                 a directory matching REL-1.0.11.3, and generate REL-1.0.11.3.zip
-
-Synopsis:
-    starting with the current working directory
-    look for files of the form: install-*.sql
-
-    if found:
-        create a new zip file
-        open install sql file and look for lines starting with @
-        for each @ file found:
-            add that file to the zip file
-        close zip file
 """
 
 def read_options():
-    parser = ArgumentParser(description='Generates an install zip file for a DBA')
+    help = """
+        Generates an install zip file for a DBA. Version %s
+        
+        Example Usage:
+
+        Step 1: Create a subdirectory for the installation (Optional: step 2 will do this if necessary)
+        .../Db-Pos-Storeord/install$ mkdir REL-3.35
+
+
+        Step 2: Create install script template
+        .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n 3.35
+
+        (creates: .../Db-Pos-Storeord/install/REL-3.35/install-3.35.sql)
+
+
+        Step 3: Edit the custom section within install-3.35.sql
+        Prefix database object files to include with an @ sign only without subdirectory names.
+
+        Example:
+        -- ***** BEGIN CUSTOM SECTION *****
+        @my_synonym.syn
+        @my_view.vw
+        @my_table.tab
+        -- ***** END CUSTOM SECTION *****
+
+
+        Step 4: Create the installation artifact:
+
+        .../Db-Pos-Storeord/install$ zipinstall 3.35
+
+        This creates: .../Db-Pos-Storeord/install/artifacts/REL-3.35.zip
+        containing:
+                install/artifacts/REL-3.35/install-3.35.sql
+                install/artifacts/REL-3.35/my_synonym.syn
+                install/artifacts/REL-3.35/my_view.vw
+                install/artifacts/REL-3.35/my_table.tab
+
+    """ % VERSION
+
+    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter, description=help)
     parser.add_argument('-t', '--file_template', metavar='FILE_TEMPLATE', default='install-*.sql', 
                         help='describes the install file name pattern to look for (default: install-*.sql)')
     parser.add_argument('--dry_run', default=False, action='store_true', 
@@ -43,11 +74,13 @@ def read_options():
     parser.add_argument('-L', '--include_list', default=False, action='store_true',
                         help='generate list of files inside install script (with -I)')
     parser.add_argument('-I', '--build_install_script', default=False, action='store_true', 
-                        help='used to generate an install template; -s required')
-    parser.add_argument('-N', '--install_version', default=None, 
+                        help='used to generate an install template; REQUIRED: -s OPTIONAL: -n')
+    parser.add_argument('-n', '--install_version', default=None, 
                         help='used to explicitly specify the install version for -I (e.g. 1.0.5)')
-    parser.add_argument('-s', '-S', '--install_schema', default=None, 
+    parser.add_argument('-s', '--install_schema', default=None, 
                         help='used to specify the install schema for -I (e.g. CUSTOMER')
+    parser.add_argument('-p', '--install_pathname', metavar='INSTALL_PATH', default='install', 
+                        help='the path name containing or to contain the installation source (default: install)')
     parser.add_argument('-F', dest='force_overwrite', default=False, action='store_true',
                         help='used to force overwriting of existing files')
     parser.add_argument('-d', '--debug_enabled', default=False, action='store_true', 
@@ -134,7 +167,7 @@ def scan_install_path(current_path, expected_path_pattern, expected_file_pattern
     ensuring it exists somewhere underneath a directory matching the expected path
 
     return the name of the found script
-           as well as all the files encountered under current_path (used when generating zip later)
+           and a list of all the files encountered under current_path (used when generating zip later)
     """
 
     script_file = None
@@ -165,12 +198,6 @@ def find_matching_subdir(filespec, dir_snippet):
 
     examples: find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "REL-1.0")    
               ==> REL-1.0-my-install
-
-              find_matching_subdir("pending-install/REL-1.0.5-my-install/mytable.tab", "REL-1.0") 
-              ==> None
-
-              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "my")         
-              ==> None
 
               find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "asdf")         
               ==> None
@@ -257,11 +284,11 @@ def cwd_name():
 
 def change_to_zip_starting_dir():
     for parent_dir_count in range(3):
-        child_dir = os.path.join(os.getcwd(), "install")
+        child_dir = os.path.join(os.getcwd(), opts.install_pathname)
         if os.path.isdir(child_dir):
             return
         os.chdir("..")
-    show("Please run from inside or above the install directory")
+    show("Please run from inside or above the %s directory" % opts.install_pathname)
     sys.exit()
 
 def write_file(filename, content):
@@ -295,7 +322,7 @@ def get_install_script_details():
 def build_install_script_template():
     ideal_dirname = "REL-%s" % opts.install_version
     if not cwd_name() == ideal_dirname:
-        if cwd_name() == 'install':
+        if cwd_name() == opts.install_pathname:
             if os.path.exists(ideal_dirname):
                 os.chdir(ideal_dirname)
             else:
@@ -318,6 +345,18 @@ def get_expected_path():
         return cwd_name()
 
 def build_zip_file():
+    """
+    starting with the current working directory
+    look for files of the form: install-*.sql
+
+    if found:
+        create a new zip file
+        open install sql file and look for lines starting with @
+        for each @ file found:
+            add that file to the zip file
+        close zip file
+    """
+
     debug("CWD %s" % os.getcwd())
     expected_path = get_expected_path()
     change_to_zip_starting_dir()
@@ -326,7 +365,11 @@ def build_zip_file():
     debug("all files encountered:\n   %s" % "\n  ".join(file_tree))
     debug("script=%s" % script)
 
-    (zip_file, message) = generate_zip_file("install/%s.zip" % actual_path, script, file_tree)
+    artifacts_dir = "%s/artifacts" % opts.install_pathname
+    if not os.path.exists(artifacts_dir):
+        os.makedirs(artifacts_dir)
+    (zip_file, message) = generate_zip_file("%s/%s.zip" % (artifacts_dir, actual_path), script, file_tree)
+
     if message:
         show(message)
     if zip_file:
