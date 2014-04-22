@@ -32,17 +32,19 @@ def read_options():
         
         Example Usage:
 
-        Step 1: Create a subdirectory for the installation (Optional: step 2 will do this if necessary)
-        .../Db-Pos-Storeord/install$ mkdir REL-3.35
+        Step 1: Create a subdirectory for the installation. The naming convention is project-version/stage
+        where project is like ssy-3.35 and stage is a sequential number starting with 1
+
+        .../Db-Pos-Storeord/install$ mkdir ssy-3.35
+        .../Db-Pos-Storeord/install/ssy-3.35$ mkdir 1
 
 
         Step 2: Create install script template
         .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n 3.35
 
-        (creates: .../Db-Pos-Storeord/install/REL-3.35/install-3.35.sql)
+        (creates: .../Db-Pos-Storeord/install/ssy-3.35/1/install.sql)
 
-
-        Step 3: Edit the custom section within install-3.35.sql
+        Step 3: Edit the custom section within install.sql
         Prefix database object files to include with an @ sign only without subdirectory names.
 
         Example:
@@ -55,9 +57,9 @@ def read_options():
 
         Step 4: Create the installation artifact:
 
-        .../Db-Pos-Storeord/install$ zipinstall 3.35
+        .../Db-Pos-Storeord/install$ zipinstall
 
-        This creates: .../Db-Pos-Storeord/install/artifacts/REL-3.35.zip
+        This creates: .../Db-Pos-Storeord/install/artifacts/ssy-3.35.zip
         containing:
                 install/artifacts/REL-3.35/install-3.35.sql
                 install/artifacts/REL-3.35/my_synonym.syn
@@ -67,7 +69,7 @@ def read_options():
     """ % VERSION
 
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter, description=help)
-    parser.add_argument('-t', '--file_template', metavar='FILE_TEMPLATE', default='install-*.sql', 
+    parser.add_argument('-t', '--file_template', metavar='FILE_TEMPLATE', default='install*.sql', 
                         help='describes the install file name pattern to look for (default: install-*.sql)')
     parser.add_argument('--dry_run', default=False, action='store_true', 
                         help='disables writing the zip file, just displays what it would contain')
@@ -188,6 +190,7 @@ def scan_install_path(current_path, expected_path_pattern, expected_file_pattern
                     debug("matching subdir = %s" % matching_subdir)
     return (script_file, script_subdir, file_tree)
 
+# this needs to change ;::
 def find_matching_subdir(filespec, dir_snippet):
     """
     given a full filespec and a directory snippet (e.g. 1.0.1), returns the actual subdirectory matching the
@@ -209,7 +212,7 @@ def find_matching_subdir(filespec, dir_snippet):
     debug("find_matching_subdir(%s, %s)" % (filespec, dir_snippet))
     while filespec:
         (filespec, part) = os.path.split(filespec)
-        debug("trying to find subdir matching %s from %s" % (dir_snippet, part))
+        debug("trying to find subdir matching %s from %s,%s" % (dir_snippet, filespec, part))
         if not dir_snippet or part == dir_snippet or part.startswith("%s-" % dir_snippet):
             debug("expected dir found: %s/%s" % (filespec, part))
             return part
@@ -241,6 +244,8 @@ def locate_referred_file(text, file_tree):
 
 def generate_zip_file(zip_name, install_file, file_tree):
     message = None
+    debug("Install file is: %s" % install_file)
+    zipentry_path = os.path.dirname(install_file)
     files_to_include = [install_file]
     if not install_file:
         return (None, "Unknown install script")
@@ -269,7 +274,8 @@ def generate_zip_file(zip_name, install_file, file_tree):
                     install_zip = ZipFile(zip_name, "w")
                     message = "File created:"
             for filename in files_to_include:
-                filespec_in_archive = "%s/%s" % (strip_ext(zip_name), os.path.basename(filename))
+                debug("ZIP file to include: %s" % filename)
+                filespec_in_archive = "%s/%s" % (zipentry_path, os.path.basename(filename))
                 maybe_show("... ENTRY: %s" % filespec_in_archive, always=opts.dry_run)
                 if install_zip:
                     install_zip.write(filename, filespec_in_archive)
@@ -361,7 +367,7 @@ def build_zip_file():
     expected_path = get_expected_path()
     change_to_zip_starting_dir()
     (script, actual_path, file_tree) = scan_install_path(".", expected_path, opts.file_template)
-
+    debug("actual path %s" % actual_path)
     debug("all files encountered:\n   %s" % "\n  ".join(file_tree))
     debug("script=%s" % script)
 
