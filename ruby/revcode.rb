@@ -6,7 +6,8 @@ Reversible Codes
 Ported from Nik's http://jsfiddle.net/nikb747/muS2P/
 """
 
-ALPHABET = 'BCDEFGHJKMNPQRSTVWXYZ23456789'
+ALPHABET = 'BCDEFGHJKMNPRSTVWXY23456789'
+
 NUM_CHARS = ALPHABET.length
 STORE_SIZE = 4
 SHIFT_INDEX = 4
@@ -64,10 +65,26 @@ def wrap_to_positive(num_to_wrap, mod_by)
     return wrap % mod_by
 end
 
-(20...25).each do |store|
-    (2000...2100).each do |sequence|
+store_start = ARGV[0].to_i
+store_end = ARGV[1].to_i
+seq_start = ARGV[2].to_i
+seq_end = ARGV[3].to_i
+
+count = 0
+(store_start...store_end).each do |store|
+    (seq_start...seq_end).each do |sequence|
         encoded = encode_store_and_sequence(store, sequence)
         dstore, dsequence = decode_to_store_and_sequence(encoded)
-        puts "#{sequence} => #{encoded} => [ #{dstore} | #{dsequence} ]"
+        status = (store == dstore and sequence == dsequence) ? "OK" : "ERROR"
+        if status == "ERROR"
+          msg = "hmm #{store},#{sequence} <> #{dstore},#{dsequence}"
+          $stderr.puts msg
+          puts msg
+        end
+        count += 1
+        if count % 100000 == 0
+          puts "#{sequence} => #{encoded} => [ #{dstore} | #{dsequence} ] [#{status}]"
+          $stderr.puts "#{count} #{store} #{sequence} #{encoded}"
+        end
     end
 end

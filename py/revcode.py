@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import math
+import sys
 
 """
 Reversible Codes
@@ -8,12 +9,17 @@ Reversible Codes
 Ported from Nik's http://jsfiddle.net/nikb747/muS2P/
 """
 
-ALPHABET = 'BCDEFGHJKMNPQRSTVWXYZ23456789'
+BIG_ALPHABET = 'BCDEFGHJKMNPRSTVWXY23456789!@#$%^&*()-_+abcdefghijklmnopqrstuvxywz'
+ALPHABET = 'ABCDEFGHJKLMNPRSTUVWXY23456789'
+
+#ALPHABET = 'CDEFHJKMNPRVWXY23456789'
 NUM_CHARS = len(ALPHABET)
 STORE_SIZE = 4
 SHIFT_INDEX = 4
 SEQUENCE_SIZE = 8
 MOD_BY = 17
+
+verbose = True
 
 def encode_store_and_sequence(store, sequence):
     shift = sequence % MOD_BY + 1
@@ -22,32 +28,34 @@ def encode_store_and_sequence(store, sequence):
 def decode_to_store_and_sequence(enc):
     c = enc[SHIFT_INDEX]
     shift = ALPHABET.index(c)
-    store = decode(enc[0:4], shift)
-    sequence = decode(enc[5:], shift)
+    store = decode(enc[0:STORE_SIZE], shift)
+    sequence = decode(enc[SHIFT_INDEX+1:], shift)
     return (store, sequence)
 
 def encode(num, pad, shift):
-    base_digits = []
-    constructed = []
-    for power in range(0, pad):
-        digit = int(math.floor(num / math.pow(NUM_CHARS, power))) % NUM_CHARS
-        base_digits.append((digit + shift + power) % NUM_CHARS)
-    for i in range(0, len(base_digits)):
-        shifted_index = (shift + i) % len(base_digits)
-        constructed.append(ALPHABET[base_digits[shifted_index]])
-    return "".join(constructed[::-1])
+    constructed = ""
+    digits = ((int(math.floor(num / NUM_CHARS ** power)) % NUM_CHARS + shift + power)
+              % NUM_CHARS for power in range(0,pad))
+    base_digits = [x for x in digits]
+    num_base_digits = len(base_digits)
+    for i in range(0, num_base_digits):
+        shifted_index = (shift + i) % num_base_digits
+        constructed = "%s%s" % (ALPHABET[base_digits[shifted_index]], constructed)
+    return constructed
 
 def decode(shifted_string, shift):
-    repos = {}
+    repositioned_chars = {}
     total = 0
-    for i in range(0, len(shifted_string)):
-        unshifted = wrap_to_positive(i - shift, len(shifted_string))
-        repos[unshifted] = shifted_string[i]
-    for i in range(len(repos)-1, 0, -1):
-        power = len(repos) - i - 1
-        some_digit = wrap_to_positive(ALPHABET.index(repos[i]) - shift - power, NUM_CHARS)
-        total += int(some_digit * math.pow(NUM_CHARS, power))
-    return total
+    l = len(shifted_string)
+    for i in range(0, l):
+        unshifted = wrap_to_positive(i - shift, l)
+        repositioned_chars[unshifted] = shifted_string[i]
+    num_repo_chars = len(repositioned_chars)
+    for i in range(num_repo_chars-1, 0, -1):
+        power = num_repo_chars - i - 1
+        some_digit = wrap_to_positive(ALPHABET.index(repositioned_chars[i]) - shift - power, NUM_CHARS)
+        total += some_digit * NUM_CHARS ** power
+    return int(total)
 
 def wrap_to_positive(num_to_wrap, mod_by):
     wrap = num_to_wrap
@@ -55,9 +63,28 @@ def wrap_to_positive(num_to_wrap, mod_by):
         wrap += mod_by
     return wrap % mod_by
 
-for store in range(20, 25):
-    for sequence in range(2000, 2100):
+
+
+args = sys.argv
+store_start = int(args[1])
+store_end = int(args[2])
+seq_start = int(args[3])
+seq_end = int(args[4])
+
+count = 0
+for store in range(store_start, store_end):
+    for sequence in range(seq_start, seq_end):
         encoded = encode_store_and_sequence(store, sequence)
+        if verbose:
+            print(encoded)
         (dstore, dsequence) = decode_to_store_and_sequence(encoded)
-        output = "%s => %s => [ %s | %s ]" % (sequence, encoded, dstore, dsequence)
-        print(output)
+        status = "OK" if dstore == store and dsequence == sequence else "ERROR"
+        output = "%s => %s => [ %s | %s ] [%s]" % (sequence, encoded, dstore, dsequence, status)
+        if status == "ERROR":
+            msg = "hmm %s,%s <> %s,%s\n" % (store, sequence, dstore, dsequence)
+            print(msg)
+            sys.stderr.write(msg)
+        count += 1
+        if count % 100000 == 0:
+            print(output)
+            sys.stderr.write("%s %s %s %s\n" % (count, store, sequence, encoded))

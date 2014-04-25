@@ -391,3 +391,4 @@ if __name__ == "__main__":
         build_install_script_template()
     else:
         build_zip_file()
+        
