@@ -9,21 +9,25 @@ Ported from Nik's http://jsfiddle.net/nikb747/muS2P/
 ALPHABET = 'BCDEFGHJKMNPRSTVWXY23456789'
 
 NUM_CHARS = ALPHABET.length
-STORE_SIZE = 4
-SHIFT_INDEX = 4
+STORE_SIZE = 3
+SHIFT_INDEX = 3
 SEQUENCE_SIZE = 8
-MOD_BY = 17
+MOD_BY = 23 # should be less than NUM_CHARS
+
+@verbose = false
 
 def encode_store_and_sequence(store, sequence)
     shift = sequence % MOD_BY + 1
-    "#{encode(store, STORE_SIZE, shift)}#{ALPHABET[shift]}#{encode(sequence, SEQUENCE_SIZE, shift)}"
+    enc = "#{encode(store, STORE_SIZE, shift)}#{ALPHABET[shift]}#{encode(sequence, SEQUENCE_SIZE, shift)}"
+    puts "#{enc} for store=#{store} seq=#{sequence}" if @verbose
+    return enc
 end
 
 def decode_to_store_and_sequence(enc)
     c = enc[SHIFT_INDEX]
     shift = ALPHABET.index(c)
-    store = decode(enc[0...4], shift)
-    sequence = decode(enc[5..-1], shift)
+    store = decode(enc[0...STORE_SIZE], shift)
+    sequence = decode(enc[STORE_SIZE+1..-1], shift)
     return store, sequence
 end
 
