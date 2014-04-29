@@ -10,14 +10,16 @@ Ported from Nik's http://jsfiddle.net/nikb747/muS2P/
 """
 
 BIG_ALPHABET = 'BCDEFGHJKMNPRSTVWXY23456789!@#$%^&*()-_+abcdefghijklmnopqrstuvxywz'
-ALPHABET = 'ABCDEFGHJKLMNPRSTUVWXY23456789'
+
+ALPHABET = 'BCDEFGHJKMNPRSTVWXY23456789' # 'ABCDEFGHJKMNPRSTUVWXY23456789'
+
 
 #ALPHABET = 'CDEFHJKMNPRVWXY23456789'
 NUM_CHARS = len(ALPHABET)
-STORE_SIZE = 4
-SHIFT_INDEX = 4
+STORE_SIZE = 3
+SHIFT_INDEX = 3
 SEQUENCE_SIZE = 8
-MOD_BY = 17
+MOD_BY = 23
 
 verbose = True
 
@@ -51,7 +53,7 @@ def decode(shifted_string, shift):
         unshifted = wrap_to_positive(i - shift, l)
         repositioned_chars[unshifted] = shifted_string[i]
     num_repo_chars = len(repositioned_chars)
-    for i in range(num_repo_chars-1, 0, -1):
+    for i in reversed(range(0, num_repo_chars)):
         power = num_repo_chars - i - 1
         some_digit = wrap_to_positive(ALPHABET.index(repositioned_chars[i]) - shift - power, NUM_CHARS)
         total += some_digit * NUM_CHARS ** power

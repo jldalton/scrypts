@@ -9,7 +9,7 @@ from glob import glob
 from fnmatch import fnmatch
 from zipfile import ZipFile
 
-VERSION = 1.1
+VERSION = 1.2
 
 opts = {}
 
@@ -39,7 +39,7 @@ def read_options():
         .../Db-Pos-Storeord/install/ssy-3.35$ mkdir 1
 
 
-        Step 2: Create install script template
+        Step 2: (Optional) Create install script template
         .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n 3.35
 
         (creates: .../Db-Pos-Storeord/install/ssy-3.35/1/install.sql)
@@ -160,7 +160,10 @@ spool off;
            "\n".join(file_list))
 
 def is_relevant_file(filespec):
-    return not filespec.endswith(".DS_Store") and not filespec.startswith("./.git")
+    return not filespec.endswith(".DS_Store") \
+        and not filespec.startswith("./.git") \
+        and not filespec.startswith("./install/completed/") \
+        and not filespec.startswith("./install/artifacts")
 
 def scan_install_path(current_path, expected_path_pattern, expected_file_pattern):
     """
@@ -172,25 +175,22 @@ def scan_install_path(current_path, expected_path_pattern, expected_file_pattern
            and a list of all the files encountered under current_path (used when generating zip later)
     """
 
-    script_file = None
-    script_subdir = None
+    script_files = []
     file_tree = []
     debug("looking for install script of the pattern: %s" % expected_file_pattern)
     for path,dirs,files in os.walk(current_path):
         for filespec in filter(lambda x: is_relevant_file(x), [os.path.join(path, f) for f in files]):
             debug("  filespec %s" % filespec)
             file_tree.append(filespec)
-            if not script_file and fnmatch(os.path.basename(filespec), expected_file_pattern):
+            if fnmatch(os.path.basename(filespec), expected_file_pattern):
                 debug("potential script is %s" % filespec)
                 debug("expected dir pattern is %s" % expected_path_pattern)
                 matching_subdir = find_matching_subdir(filespec, expected_path_pattern)
                 if matching_subdir:
-                    script_file = filespec
-                    script_subdir = matching_subdir
+                    script_files.append(filespec)
                     debug("matching subdir = %s" % matching_subdir)
-    return (script_file, script_subdir, file_tree)
+    return (script_files, file_tree)
 
-# this needs to change ;::
 def find_matching_subdir(filespec, dir_snippet):
     """
     given a full filespec and a directory snippet (e.g. 1.0.1), returns the actual subdirectory matching the
@@ -366,20 +366,24 @@ def build_zip_file():
     debug("CWD %s" % os.getcwd())
     expected_path = get_expected_path()
     change_to_zip_starting_dir()
-    (script, actual_path, file_tree) = scan_install_path(".", expected_path, opts.file_template)
-    debug("actual path %s" % actual_path)
+    (scripts, file_tree) = scan_install_path(".", expected_path, opts.file_template)
     debug("all files encountered:\n   %s" % "\n  ".join(file_tree))
-    debug("script=%s" % script)
+    debug("scripts:\n %s" % "\n ".join(scripts))
 
     artifacts_dir = "%s/artifacts" % opts.install_pathname
     if not os.path.exists(artifacts_dir):
         os.makedirs(artifacts_dir)
-    (zip_file, message) = generate_zip_file("%s/%s.zip" % (artifacts_dir, actual_path), script, file_tree)
 
-    if message:
-        show(message)
-    if zip_file:
-        show(os.path.abspath(zip_file))
+    for script in scripts:
+        (zip_file, message) = generate_zip_file(generate_zip_filespec(script, artifacts_dir), script, file_tree)
+        if message:
+            show(message)
+        if zip_file:
+            show(os.path.abspath(zip_file))
+
+def generate_zip_filespec(script, output_dir):
+     (script_path, script_filename) = os.path.split(script)
+     return "%s/%s.zip" % (output_dir, script_path.replace("/", " ").replace(".", " ").strip().replace(" ", "-"))
 
 # ________________________
 
