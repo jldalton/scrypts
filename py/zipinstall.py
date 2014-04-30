@@ -9,45 +9,27 @@ from glob import glob
 from fnmatch import fnmatch
 from zipfile import ZipFile
 
-VERSION = 1.2
+VERSION = 1.3
 
 opts = {}
 
 """
 Summary:
     Builds an installation zip file for a DBA to run.
-
-Examples:
-    zipinstall              ==> will look for install script (of the pattern install-*.sql) from the CWD down
-                                (first one found wins), and generate install.zip containing install/install-*sql 
-                                and any files needed.
-
-    zipinstall 1.0.11.3     ==> run this at the root of a project; it will look for an install script in 
-                                a directory matching REL-1.0.11.3, and generate REL-1.0.11.3.zip
 """
 
 def read_options():
     help = """
-        Generates an install zip file for a DBA. Version %s
-        
-        Example Usage:
+        Generates an install zip file for a DBA. Version %s. Usage:
 
-        Step 1: Create a subdirectory for the installation. The naming convention is project-version/stage
-        where project is like ssy-3.35 and stage is a sequential number starting with 1
+        Step 1: Initialize the install script. Example:
+        .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n ssy-3.35
 
-        .../Db-Pos-Storeord/install$ mkdir ssy-3.35
-        .../Db-Pos-Storeord/install/ssy-3.35$ mkdir 1
+        This example creates Db-Pos-Storeord/install/ssy-3.35/1/install.sql)
 
+        Step 2: Edit the custom section within install.sql
+        Prefix database object files to include with an @ sign (without subdirectory name). Example:
 
-        Step 2: (Optional) Create install script template
-        .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n 3.35
-
-        (creates: .../Db-Pos-Storeord/install/ssy-3.35/1/install.sql)
-
-        Step 3: Edit the custom section within install.sql
-        Prefix database object files to include with an @ sign only without subdirectory names.
-
-        Example:
         -- ***** BEGIN CUSTOM SECTION *****
         @my_synonym.syn
         @my_view.vw
@@ -55,17 +37,15 @@ def read_options():
         -- ***** END CUSTOM SECTION *****
 
 
-        Step 4: Create the installation artifact:
+        Step 3: Create the installation artifact. Example:
+        .../Db-Pos-Storeord/install/ssy-3.35$ zipinstall
 
-        .../Db-Pos-Storeord/install$ zipinstall
-
-        This creates: .../Db-Pos-Storeord/install/artifacts/ssy-3.35.zip
+        This example creates: .../Db-Pos-Storeord/install/artifacts/install-ssy-3.35-1.zip
         containing:
-                install/artifacts/REL-3.35/install-3.35.sql
-                install/artifacts/REL-3.35/my_synonym.syn
-                install/artifacts/REL-3.35/my_view.vw
-                install/artifacts/REL-3.35/my_table.tab
-
+                install/artifacts/ssy-3.35/1/install.sql
+                install/artifacts/ssy-3.35/1/my_synonym.syn
+                install/artifacts/ssy-3.35/1/my_view.vw
+                install/artifacts/ssy-3.35/1/my_table.tab
     """ % VERSION
 
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter, description=help)
@@ -83,6 +63,8 @@ def read_options():
                         help='used to specify the install schema for -I (e.g. CUSTOMER')
     parser.add_argument('-p', '--install_pathname', metavar='INSTALL_PATH', default='install', 
                         help='the path name containing or to contain the installation source (default: install)')
+    parser.add_argument('--repo_prefix', metavar='REPO_PREFIX', default='Db-',
+                        help='the prefix string for repository names (default: Db-')
     parser.add_argument('-F', dest='force_overwrite', default=False, action='store_true',
                         help='used to force overwriting of existing files')
     parser.add_argument('-d', '--debug_enabled', default=False, action='store_true', 
@@ -90,7 +72,7 @@ def read_options():
     parser.add_argument('-v', '--verbose', default=False, action='store_true', 
                         help='enable verbose mode')
     parser.add_argument('path_template', default=None, nargs='?', 
-                        help='[optional] the path segment install file should be in (note: A.B => REL-A.B)')
+                        help='[optional] the path segment an install file should be in')
     options = parser.parse_args(sys.argv[1:])
 
     if options.build_install_script and not options.install_schema:
@@ -111,6 +93,17 @@ def maybe_show(str, always=False):
 
 def show(str):
     print(str)
+
+def cwd_name():
+    return os.path.basename(os.getcwd())
+
+def cwd_parent():
+    return os.path.basename(os.path.dirname(os.getcwd()))
+
+def abort(msg=None):
+    if msg:
+        show(msg)
+    sys.exit()
 
 def has_ext(filespec):
     return os.path.splitext(filespec)[1]
@@ -177,6 +170,7 @@ def scan_install_path(current_path, expected_path_pattern, expected_file_pattern
 
     script_files = []
     file_tree = []
+    previously_matched_subdir = None
     debug("looking for install script of the pattern: %s" % expected_file_pattern)
     for path,dirs,files in os.walk(current_path):
         for filespec in filter(lambda x: is_relevant_file(x), [os.path.join(path, f) for f in files]):
@@ -187,33 +181,36 @@ def scan_install_path(current_path, expected_path_pattern, expected_file_pattern
                 debug("expected dir pattern is %s" % expected_path_pattern)
                 matching_subdir = find_matching_subdir(filespec, expected_path_pattern)
                 if matching_subdir:
-                    script_files.append(filespec)
-                    debug("matching subdir = %s" % matching_subdir)
+                    if previously_matched_subdir and matching_subdir != previously_matched_subdir:
+                        show("Skipping duplicate '%s' as it matches '%s', but not '%s'" % \
+                              (matching_subdir, expected_path_pattern, previously_matched_subdir))
+                    else:
+                        script_files.append(filespec)
+                        if not previously_matched_subdir:
+                            show("Building installation for '%s'" % matching_subdir)
+                        previously_matched_subdir = matching_subdir
+                        debug("adding matched subdir (%s)" % matching_subdir)
+
     return (script_files, file_tree)
 
 def find_matching_subdir(filespec, dir_snippet):
     """
     given a full filespec and a directory snippet (e.g. 1.0.1), returns the actual subdirectory matching the
-    snippet if the filespec is found underneath that subdirectory.
-    (to match, a subdir has to match the snippet or match snippet followed by a dash)
+    snippet if the filespec is found within the subdirectory tree.
+    (to match, the snippet must be the same as the subdirectory or be the suffix of a subdirectory)
 
-    if no dir_snippet given, return the parent directory of the filespec
+    examples: find_matching_subdir("./install/ssy-1.0.0/1/install.sql", "1.0.0")
+              ==returns==> ssy-1.0.0
 
-    examples: find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "REL-1.0")    
-              ==> REL-1.0-my-install
-
-              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", "asdf")         
-              ==> None
-
-              find_matching_subdir("pending-install/REL-1.0-my-install/mytable.tab", None)         
-              ==> REL-1.0-my-install
+              find_matching_subdir("./install/ssy-1.0.0/1/install.sql", "XYZZY")
+              ==returns==> None
     """
 
     debug("find_matching_subdir(%s, %s)" % (filespec, dir_snippet))
     while filespec:
         (filespec, part) = os.path.split(filespec)
         debug("trying to find subdir matching %s from %s,%s" % (dir_snippet, filespec, part))
-        if not dir_snippet or part == dir_snippet or part.startswith("%s-" % dir_snippet):
+        if not dir_snippet or part == dir_snippet or part.endswith("-%s" % dir_snippet):
             debug("expected dir found: %s/%s" % (filespec, part))
             return part
     return None
@@ -269,7 +266,7 @@ def generate_zip_file(zip_name, install_file, file_tree):
                 message = "Nothing written (dry run)"
             else:
                 if os.path.isfile(zip_name) and not opts.force_overwrite:
-                    message = "File %s exists; add -F option to overwrite" % zip_name
+                    message = "File exists: %s; use -F option to overwrite" % zip_name
                 else:
                     install_zip = ZipFile(zip_name, "w")
                     message = "File created:"
@@ -285,17 +282,13 @@ def generate_zip_file(zip_name, install_file, file_tree):
 
         return (install_zip and install_zip.filename or None, message)
 
-def cwd_name():
-    return os.path.basename(os.getcwd())        
-
 def change_to_zip_starting_dir():
-    for parent_dir_count in range(3):
+    for parent_dir_count in range(4):
         child_dir = os.path.join(os.getcwd(), opts.install_pathname)
         if os.path.isdir(child_dir):
             return
         os.chdir("..")
-    show("Please run from inside or above the %s directory" % opts.install_pathname)
-    sys.exit()
+    abort("Please run from inside or above the %s directory" % opts.install_pathname)
 
 def write_file(filename, content):
     if os.path.isfile(filename):
@@ -305,7 +298,7 @@ def write_file(filename, content):
     try:
         f = file(filename, 'w')
         f.writelines(content)
-        show("File '%s' written" % os.path.abspath(filename))
+        show("File created: '%s'" % os.path.abspath(filename))
     finally:
         f.close()
 
@@ -315,47 +308,78 @@ def filenames_to_include(excepting=None, prefix='@'):
         to_include = ["%s%s" % (prefix, x) for x in glob("*") if x != excepting]
     return to_include
 
-def derive_install_version():
-    return cwd_name().split("REL-")[-1]
-
 def get_install_script_details():
-    version = opts.install_version or derive_install_version() or "N.N.N"
+    imbedded_version = "%s-%s" % (opts.install_version, cwd_name())
     schema = (opts.install_schema or "MISSING_SCHEMA").upper()
     filename_template = opts.file_template.replace("*", "%s")
-    filename = os.path.join(".", filename_template % version)
-    return (filename, version, schema)
+    filename = os.path.join(".", filename_template % "")
+    return (filename, imbedded_version, schema)
 
-def build_install_script_template():
-    ideal_dirname = "REL-%s" % opts.install_version
-    if not cwd_name() == ideal_dirname:
-        if cwd_name() == opts.install_pathname:
-            if os.path.exists(ideal_dirname):
-                os.chdir(ideal_dirname)
-            else:
-                os.makedirs(ideal_dirname)
-                os.chdir(ideal_dirname)
-    (filename, version, schema) = get_install_script_details()                
+def build_install_script_boiler_plate_file():
+    create_and_change_to_installation_directory()
+    (filename, version, schema) = get_install_script_details()
     file_content = install_file_content(version, schema, filenames_to_include(excepting=filename))
     write_file(filename, file_content)
 
-def get_expected_path():
-    """
-    the optional expected path containing install script, allowing 1.1 to be shortcut for REL-1.1
-    """
-    if opts.path_template:
-        if is_dotted_number(opts.path_template):
-            return "REL-%s" % opts.path_template
+def derive_version():
+    if not opts.install_version:
+        if cwd_name().isdigit():
+            opts.install_version = cwd_parent()
+        elif cwd_parent() == opts.install_pathname:
+            opts.install_version = cwd_name()
         else:
-            return opts.path_template
-    else:
-        return cwd_name()
+            abort_not_enough_detail_for_script()
+    return opts.install_version
 
-def build_zip_file():
+def find_best_numbered_dir():
+    for n in range(1,100):
+        if not os.path.exists("./%d/install.sql" % n):
+            return str(n)
+    abort("Unsure where to create installation script. Are you sure you want to be in %s?" % os.getcwd())
+
+def create_and_change_to_installation_directory():
+
+    version_dir = derive_version()
+
+    if cwd_name().isdigit() and cwd_parent() == version_dir:
+        return
+    elif cwd_name() == version_dir:
+        make_and_change_dir()
+    elif cwd_name() == opts.install_pathname:
+        make_and_change_dir(version_dir)
+    elif cwd_name().startswith("%s" % opts.repo_prefix):
+        make_and_change_dir("%s/%s" % (opts.install_pathname, version_dir))
+    else:
+        abort("Unsure where to put installation file. Are you sure you want to be in %s?" % os.getcwd())
+
+def make_and_change_dir(dir=None):
+    if dir:
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        os.chdir(dir)
+    if cwd_name() == opts.install_version:
+        make_and_change_dir(find_best_numbered_dir())
+
+def get_expected_installation_location():
+    """
+    the name or partial name of the subdirectory that contains the installation script (e.g. ssy-3.33.1 or 3.33.1)
+    """
+    return opts.path_template or get_subdirectory_under_install()
+
+def get_subdirectory_under_install():
+    dir = os.getcwd()
+    while len(dir) > 1:
+        (dir, path_segment) = os.path.split(dir)
+        if dir.endswith("/%s" % opts.install_pathname):
+            return path_segment
+    return None
+
+def build_zip_files():
     """
     starting with the current working directory
-    look for files of the form: install-*.sql
+    look for files of the form: install*.sql
 
-    if found:
+    for each found:
         create a new zip file
         open install sql file and look for lines starting with @
         for each @ file found:
@@ -364,11 +388,17 @@ def build_zip_file():
     """
 
     debug("CWD %s" % os.getcwd())
-    expected_path = get_expected_path()
+    installation_location = get_expected_installation_location()
+    if not installation_location:
+        abort_not_enough_detail_for_zip()
+
     change_to_zip_starting_dir()
-    (scripts, file_tree) = scan_install_path(".", expected_path, opts.file_template)
+    (scripts, file_tree) = scan_install_path(".", installation_location, opts.file_template)
     debug("all files encountered:\n   %s" % "\n  ".join(file_tree))
     debug("scripts:\n %s" % "\n ".join(scripts))
+
+    if not scripts:
+        abort_not_found(installation_location)
 
     artifacts_dir = "%s/artifacts" % opts.install_pathname
     if not os.path.exists(artifacts_dir):
@@ -385,6 +415,35 @@ def generate_zip_filespec(script, output_dir):
      (script_path, script_filename) = os.path.split(script)
      return "%s/%s.zip" % (output_dir, script_path.replace("/", " ").replace(".", " ").strip().replace(" ", "-"))
 
+def abort_not_found(location):
+        abort("""Not sure which installation zip to generate. See 'zipinstall --help'.
+
+Did not find an installation script within a subdirectory matching '%s'
+"""  % location)
+
+def abort_not_enough_detail_for_zip():
+        abort("""
+Not sure which installation zip to generate. See 'zipinstall --help'.
+
+Try running in a subdirectory below %s, or provide a path segment argument like:
+
+zipinstall 1.0.0
+or
+zipinstall ssy-3.33.5
+"""  % opts.install_pathname)
+
+def abort_not_enough_detail_for_script():
+        abort("""
+Unsure where to create installation script.
+
+Are you sure you want to be in %s?"
+Or did you forget to add the -n parameter? See 'zipinstall --help'.
+
+Example:
+
+zipinstall -I -s %s -n some-project-0.0.0
+"""  % (os.getcwd(), opts.install_schema))
+
 # ________________________
 
 if __name__ == "__main__":
@@ -392,7 +451,7 @@ if __name__ == "__main__":
 
     opts = read_options()
     if opts.build_install_script:
-        build_install_script_template()
+        build_install_script_boiler_plate_file()
     else:
-        build_zip_file()
+        build_zip_files()
         
