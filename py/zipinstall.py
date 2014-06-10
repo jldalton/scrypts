@@ -9,9 +9,11 @@ from glob import glob
 from fnmatch import fnmatch
 from zipfile import ZipFile
 
-VERSION = 1.3
+VERSION = "1.3.1"
+NAME = "zipinstall"
 
 opts = {}
+
 
 """
 Summary:
@@ -20,10 +22,20 @@ Summary:
 
 def read_options():
     help = """
-        Generates an install zip file for a DBA. Version %s. Usage:
+        Generates an install zip file for a DBA. Version %s.
+
+        For detailed usage, %s -u
+    """ % (VERSION, NAME)
+
+    script = NAME
+    usage_help = """
+        Usage
 
         Step 1: Initialize the install script. Example:
-        .../Db-Pos-Storeord/install$ zipinstall -I -s STOREORD -n ssy-3.35
+        .../Db-Pos-Storeord/install$ %(script)s -I -s STOREORD -n ssy-3.35
+
+        or:
+        .../Db-Pos-Storeord/install/ssy-3.35$ %(script)s -I -s STOREORD
 
         This example creates Db-Pos-Storeord/install/ssy-3.35/1/install.sql)
 
@@ -38,7 +50,7 @@ def read_options():
 
 
         Step 3: Create the installation artifact. Example:
-        .../Db-Pos-Storeord/install/ssy-3.35$ zipinstall
+        .../Db-Pos-Storeord/install/ssy-3.35$ %(script)s
 
         This example creates: .../Db-Pos-Storeord/install/artifacts/install-ssy-3.35-1.zip
         containing:
@@ -46,37 +58,42 @@ def read_options():
                 install/artifacts/ssy-3.35/1/my_synonym.syn
                 install/artifacts/ssy-3.35/1/my_view.vw
                 install/artifacts/ssy-3.35/1/my_table.tab
-    """ % VERSION
+        """ % locals()
 
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter, description=help)
-    parser.add_argument('-t', '--file_template', metavar='FILE_TEMPLATE', default='install*.sql', 
+    parser.add_argument('-u', '--usage', default=False, action='store_true',
+                        help='show usage, and exit')
+    parser.add_argument('-t', '--file_template', metavar='FILE_TEMPLATE', default='install*.sql',
                         help='describes the install file name pattern to look for (default: install-*.sql)')
-    parser.add_argument('--dry_run', default=False, action='store_true', 
+    parser.add_argument('--dry_run', default=False, action='store_true',
                         help='disables writing the zip file, just displays what it would contain')
     parser.add_argument('-L', '--include_list', default=False, action='store_true',
                         help='generate list of files inside install script (with -I)')
-    parser.add_argument('-I', '--build_install_script', default=False, action='store_true', 
+    parser.add_argument('-I', '--build_install_script', default=False, action='store_true',
                         help='used to generate an install template; REQUIRED: -s OPTIONAL: -n')
-    parser.add_argument('-n', '--install_version', default=None, 
+    parser.add_argument('-n', '--install_version', default=None,
                         help='used to explicitly specify the install version for -I (e.g. 1.0.5)')
-    parser.add_argument('-s', '--install_schema', default=None, 
+    parser.add_argument('-s', '--install_schema', default=None,
                         help='used to specify the install schema for -I (e.g. CUSTOMER')
-    parser.add_argument('-p', '--install_pathname', metavar='INSTALL_PATH', default='install', 
+    parser.add_argument('-p', '--install_pathname', metavar='INSTALL_PATH', default='install',
                         help='the path name containing or to contain the installation source (default: install)')
     parser.add_argument('--repo_prefix', metavar='REPO_PREFIX', default='Db-',
                         help='the prefix string for repository names (default: Db-')
     parser.add_argument('-F', dest='force_overwrite', default=False, action='store_true',
                         help='used to force overwriting of existing files')
-    parser.add_argument('-d', '--debug_enabled', default=False, action='store_true', 
-                        help='enable debug output')   
-    parser.add_argument('-v', '--verbose', default=False, action='store_true', 
+    parser.add_argument('-d', '--debug_enabled', default=False, action='store_true',
+                        help='enable debug output')
+    parser.add_argument('-v', '--verbose', default=False, action='store_true',
                         help='enable verbose mode')
-    parser.add_argument('path_template', default=None, nargs='?', 
+    parser.add_argument('path_template', default=None, nargs='?',
                         help='[optional] the path segment an install file should be in')
     options = parser.parse_args(sys.argv[1:])
 
+    if options.usage:
+        abort(usage_help)
+
     if options.build_install_script and not options.install_schema:
-        parser.error("Schema option (-s) required if building install script (-I); -h for more info")
+        parser.error("Schema option (-s) required if building install script (-I); %s -h for more info" % NAME)
 
     return options
 
@@ -85,7 +102,7 @@ def debug(text):
         print("[DEBUG] %s" % text)
 
 def is_verbose():
-    return opts.verbose        
+    return opts.verbose
 
 def maybe_show(str, always=False):
     if is_verbose() or always:
@@ -120,11 +137,17 @@ def is_dotted_number(st):
     """
     return st and re.match('^\d+(\.\d+)+$', st) or None
 
+def fixpath(path):
+    """
+    renders path string in the correct format for the running system
+    """
+    return path.replace("/", os.sep)
+
 def install_file_content(version='VERSION', schema='SCHEMA', file_list=[]):
     return """
 -- spool output to a logfile
 column spoolfile new_value v_spoolfile
-select 'install-' || sys_context('USERENV','DB_NAME') || '-%s-' || to_char(sysdate,'yyyymmdd') || '.out' as spoolfile 
+select 'install-' || sys_context('USERENV','DB_NAME') || '-%s-' || to_char(sysdate,'yyyymmdd') || '.out' as spoolfile
   from dual;
 spool &v_spoolfile.
 
@@ -143,24 +166,24 @@ ALTER SESSION SET CURRENT_SCHEMA=%s;
 %s
 -- ***** END CUSTOM SECTION *****
 
-select 'Ending Install: '||to_char(sysdate, 'yyyy-mm-dd DY hh24:mi:ss') 
+select 'Ending Install: '||to_char(sysdate, 'yyyy-mm-dd DY hh24:mi:ss')
 as end_script from dual;
 
 spool off;
-    """ % (version, 
-           schema, 
+    """ % (version,
+           schema,
            "-- file list (might need reordering):" if file_list else "",
            "\n".join(file_list))
 
 def is_relevant_file(filespec):
     return not filespec.endswith(".DS_Store") \
-        and not filespec.startswith("./.git") \
-        and not filespec.startswith("./install/completed/") \
-        and not filespec.startswith("./install/artifacts")
+        and not filespec.startswith(fixpath("./.git")) \
+        and not filespec.startswith(fixpath("./install/completed/")) \
+        and not filespec.startswith(fixpath("./install/artifacts"))
 
 def scan_install_path(current_path, expected_path_pattern, expected_file_pattern):
     """
-    starting at current_path, 
+    starting at current_path,
     look for an install script file matching the expected file pattern (e.g. install-*.sql)
     ensuring it exists somewhere underneath a directory matching the expected path
 
@@ -209,15 +232,15 @@ def find_matching_subdir(filespec, dir_snippet):
     debug("find_matching_subdir(%s, %s)" % (filespec, dir_snippet))
     while filespec:
         (filespec, part) = os.path.split(filespec)
-        debug("trying to find subdir matching %s from %s,%s" % (dir_snippet, filespec, part))
+        debug("trying to find subdir matching %(dir_snippet)s from %(filespec)s,%(part)s" % locals())
         if not dir_snippet or part == dir_snippet or part.endswith("-%s" % dir_snippet):
-            debug("expected dir found: %s/%s" % (filespec, part))
+            debug("expected dir found: %(filespec)s/%(part)s" % locals())
             return part
     return None
 
 def find_file_in_tree(some_file, file_tree):
-    if some_file.startswith(".") or some_file.startswith("/") or some_file.startswith("\\"):
-        raise Exception("relative paths in referenced filenames not supported")
+    if some_file.startswith(".") or some_file.startswith(fixpath("/")):
+        abort("!! Error: relative paths in referenced filenames not supported: %s" % some_file)
     for filespec in file_tree:
         #debug("find f:%s fn:%s os.path.basename(f):%s" % (f, fn, os.path.basename(f)))
         if os.path.basename(filespec) == some_file:
@@ -236,7 +259,7 @@ def locate_referred_file(text, file_tree):
         debug("looking for %s" % possible_file)
         filespec = find_file_in_tree(possible_file, file_tree)
         if not filespec:
-            raise Exception("Could not find file mentioned in the line: %s" % text)
+            abort("!! Error: could not find file mentioned in the line: %s" % text)
     return filespec
 
 def generate_zip_file(zip_name, install_file, file_tree):
@@ -266,13 +289,13 @@ def generate_zip_file(zip_name, install_file, file_tree):
                 message = "Nothing written (dry run)"
             else:
                 if os.path.isfile(zip_name) and not opts.force_overwrite:
-                    message = "File exists: %s; use -F option to overwrite" % zip_name
+                    message = "!! File exists: %s; use -F option to overwrite" % zip_name
                 else:
                     install_zip = ZipFile(zip_name, "w")
                     message = "File created:"
             for filename in files_to_include:
                 debug("ZIP file to include: %s" % filename)
-                filespec_in_archive = "%s/%s" % (zipentry_path, os.path.basename(filename))
+                filespec_in_archive = fixpath("%s/%s" % (zipentry_path, os.path.basename(filename)))
                 maybe_show("... ENTRY: %s" % filespec_in_archive, always=opts.dry_run)
                 if install_zip:
                     install_zip.write(filename, filespec_in_archive)
@@ -315,12 +338,6 @@ def get_install_script_details():
     filename = os.path.join(".", filename_template % "")
     return (filename, imbedded_version, schema)
 
-def build_install_script_boiler_plate_file():
-    create_and_change_to_installation_directory()
-    (filename, version, schema) = get_install_script_details()
-    file_content = install_file_content(version, schema, filenames_to_include(excepting=filename))
-    write_file(filename, file_content)
-
 def derive_version():
     if not opts.install_version:
         if cwd_name().isdigit():
@@ -329,16 +346,18 @@ def derive_version():
             opts.install_version = cwd_name()
         else:
             abort_not_enough_detail_for_script()
+    debug("Determined that the version is %s" % opts.install_version)
     return opts.install_version
 
 def find_best_numbered_dir():
     for n in range(1,100):
-        if not os.path.exists("./%d/install.sql" % n):
+        if not os.path.exists(fixpath("./%d/install.sql" % (n))):
             return str(n)
     abort("Unsure where to create installation script. Are you sure you want to be in %s?" % os.getcwd())
 
 def create_and_change_to_installation_directory():
 
+    debug("Currently in directory %s" % os.getcwd())
     version_dir = derive_version()
 
     if cwd_name().isdigit() and cwd_parent() == version_dir:
@@ -348,14 +367,16 @@ def create_and_change_to_installation_directory():
     elif cwd_name() == opts.install_pathname:
         make_and_change_dir(version_dir)
     elif cwd_name().startswith("%s" % opts.repo_prefix):
-        make_and_change_dir("%s/%s" % (opts.install_pathname, version_dir))
+        make_and_change_dir(fixpath("%s/%s" % (opts.install_pathname, version_dir)))
     else:
         abort("Unsure where to put installation file. Are you sure you want to be in %s?" % os.getcwd())
 
 def make_and_change_dir(dir=None):
     if dir:
         if not os.path.exists(dir):
+            debug("creating dir %s" % dir)
             os.makedirs(dir)
+        debug("changing to dir %s" % dir)
         os.chdir(dir)
     if cwd_name() == opts.install_version:
         make_and_change_dir(find_best_numbered_dir())
@@ -368,11 +389,59 @@ def get_expected_installation_location():
 
 def get_subdirectory_under_install():
     dir = os.getcwd()
-    while len(dir) > 1:
+    prev_dir = None
+    while dir != prev_dir:
+        prev_dir = dir
         (dir, path_segment) = os.path.split(dir)
-        if dir.endswith("/%s" % opts.install_pathname):
+        if dir.endswith(fixpath("/%s" % (opts.install_pathname))):
             return path_segment
     return None
+
+def generate_zip_filespec(script, output_dir):
+     (script_path, script_filename) = os.path.split(script)
+     zipname = script_path.replace(os.sep, " ").replace(".", " ").strip().replace(" ", "-")
+     return fixpath("%s/%s.zip" % (output_dir, zipname))
+
+def abort_not_found(location):
+    name = NAME
+    abort("""Not sure which installation zip to generate. See '%(name)s --help'.
+
+Did not find an installation script within a subdirectory matching '%(location)s'
+"""  % locals())
+
+def abort_not_enough_detail_for_zip():
+    name = NAME
+    install_path = opts.install_pathname
+    abort("""
+Not sure which installation zip to generate. See '%(name)s --help'.
+
+Try running in a subdirectory below %(install_path)s, or provide a path segment argument like:
+
+%(name)s 1.0.0
+or
+%(name)s ssy-3.33.5
+"""  % locals())
+
+def abort_not_enough_detail_for_script():
+    name = NAME
+    cwd = os.getcwd()
+    schema = opts.install_schema
+    abort("""
+Unsure where to create installation script.
+
+Are you sure you want to be in %(cwd)s?"
+Or did you forget to add the -n parameter? See '%(name)s --help'.
+
+Example:
+
+%(name)s -I -s %(schema)s -n some-project-0.0.0
+"""  % locals())
+
+def build_install_script_boiler_plate_file():
+    create_and_change_to_installation_directory()
+    (filename, version, schema) = get_install_script_details()
+    file_content = install_file_content(version, schema, filenames_to_include(excepting=filename))
+    write_file(filename, file_content)
 
 def build_zip_files():
     """
@@ -410,39 +479,6 @@ def build_zip_files():
             show(message)
         if zip_file:
             show(os.path.abspath(zip_file))
-
-def generate_zip_filespec(script, output_dir):
-     (script_path, script_filename) = os.path.split(script)
-     return "%s/%s.zip" % (output_dir, script_path.replace("/", " ").replace(".", " ").strip().replace(" ", "-"))
-
-def abort_not_found(location):
-        abort("""Not sure which installation zip to generate. See 'zipinstall --help'.
-
-Did not find an installation script within a subdirectory matching '%s'
-"""  % location)
-
-def abort_not_enough_detail_for_zip():
-        abort("""
-Not sure which installation zip to generate. See 'zipinstall --help'.
-
-Try running in a subdirectory below %s, or provide a path segment argument like:
-
-zipinstall 1.0.0
-or
-zipinstall ssy-3.33.5
-"""  % opts.install_pathname)
-
-def abort_not_enough_detail_for_script():
-        abort("""
-Unsure where to create installation script.
-
-Are you sure you want to be in %s?"
-Or did you forget to add the -n parameter? See 'zipinstall --help'.
-
-Example:
-
-zipinstall -I -s %s -n some-project-0.0.0
-"""  % (os.getcwd(), opts.install_schema))
 
 # ________________________
 
