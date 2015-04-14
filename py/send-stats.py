@@ -1,7 +1,7 @@
 import sys
 
 if len(sys.argv) < 2:
-    print("Usage: send_stats {consolidate-out file}")
+    print("Usage: %s {consolidated-output-file}" % sys.argv[0])
     sys.exit()
 
 ok = 0
